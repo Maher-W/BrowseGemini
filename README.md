@@ -46,7 +46,7 @@ go run ./cmd/server
 
 **Using Docker:**
 ```bash
-docker build -t browse-gemini server/
+docker build -t browse-gemini .
 docker run -d -p 8080:8080 \
   -e ADMIN_PASSWORD="your-admin-password" \
   -e EXTENSION_SECRET_TOKEN="your-extension-token" \
