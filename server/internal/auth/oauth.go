@@ -200,7 +200,7 @@ var loginTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE html>
     </form>
 
     <div class="footer">
-      Protected by Antigravity Gemini-Browser Bridge &bull; Port 8080
+      Protected by BrowseGemini &bull; Port 8080
     </div>
   </div>
 </body>

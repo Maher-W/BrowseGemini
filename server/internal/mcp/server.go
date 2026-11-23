@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"gemini-browser/server/internal/hub"
+	"github.com/Maher-W/BrowseGemini/server/internal/hub"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -17,7 +17,7 @@ type ServerWrapper struct {
 
 func NewServer(h *hub.Hub) *ServerWrapper {
 	s := mcp.NewServer(&mcp.Implementation{
-		Name:    "gemini-browser-bridge",
+		Name:    "browse-gemini",
 		Version: "1.0.0",
 	}, nil)
 

@@ -1,4 +1,4 @@
-module gemini-browser/server
+module github.com/Maher-W/BrowseGemini/server
 
 go 1.25.0
 

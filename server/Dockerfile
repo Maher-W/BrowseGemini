@@ -15,7 +15,7 @@ COPY . .
 # Compile stripped static binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-s -w -extldflags '-static'" \
-    -o /app/gemini-browser-server ./cmd/server
+    -o /app/browse-gemini ./cmd/server
 
 # Stage 2: Minimal runtime image (~10MB RAM footprint)
 FROM alpine:3.21
@@ -28,7 +28,7 @@ WORKDIR /app
 # Create volume mount point for persistent OAuth client and token state
 VOLUME ["/data"]
 
-COPY --from=builder /app/gemini-browser-server /app/gemini-browser-server
+COPY --from=builder /app/browse-gemini /app/browse-gemini
 
 ENV PORT=8080 \
     HOST=0.0.0.0 \
@@ -36,8 +36,8 @@ ENV PORT=8080 \
 
 EXPOSE 8080
 
-# Coolify & Docker health check probe
+# Health check probe
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8080/health || exit 1
 
-ENTRYPOINT ["/app/gemini-browser-server"]
+ENTRYPOINT ["/app/browse-gemini"]

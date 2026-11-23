@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Gemini Live Browser Connector",
+  "name": "BrowseGemini - Live Browser Controller",
   "version": "1.0.0",
   "description": "Ultra-lightweight bridge connecting Google Gemini (via MCP) to live Google Chrome tabs via CDP and extension APIs.",
   "permissions": [
@@ -15,7 +15,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Gemini Browser Connector",
+    "default_title": "BrowseGemini",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

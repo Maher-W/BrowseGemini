@@ -1,4 +1,4 @@
-// background.js - Gemini Live Browser Connector Service Worker (MV3)
+// background.js - BrowseGemini Chrome Extension Service Worker (MV3)
 
 // State
 let ws = null;

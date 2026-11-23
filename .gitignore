@@ -1,4 +1,8 @@
-# Local tools & dependencies
+# Environment variables
+.env
+.env.local
+
+# Local tools & build artifacts
 .tools/
 *.exe
 data/

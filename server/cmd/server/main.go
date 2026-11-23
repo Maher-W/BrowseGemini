@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"gemini-browser/server/internal/auth"
-	"gemini-browser/server/internal/hub"
-	mcpserver "gemini-browser/server/internal/mcp"
+	"github.com/Maher-W/BrowseGemini/server/internal/auth"
+	"github.com/Maher-W/BrowseGemini/server/internal/hub"
+	mcpserver "github.com/Maher-W/BrowseGemini/server/internal/mcp"
 )
 
 func getEnv(key, defaultVal string) string {
@@ -26,7 +26,7 @@ func getEnv(key, defaultVal string) string {
 
 func main() {
 	log.Println("==================================================")
-	log.Println(" Gemini Live Chrome Browser MCP Server starting...")
+	log.Println(" BrowseGemini MCP Server starting...")
 	log.Println("==================================================")
 
 	port := getEnv("PORT", "8080")
@@ -34,13 +34,13 @@ func main() {
 	dataDir := getEnv("DATA_DIR", "/data")
 	baseURL := getEnv("BASE_URL", "")
 	adminPassword := getEnv("ADMIN_PASSWORD", "admin123")
-	extensionToken := getEnv("EXTENSION_SECRET_TOKEN", "supersecret-gemini-token")
+	extensionToken := getEnv("EXTENSION_SECRET_TOKEN", "supersecret-token")
 
 	if os.Getenv("ADMIN_PASSWORD") == "" {
 		log.Println("[SECURITY WARNING] ADMIN_PASSWORD not set in environment. Defaulting to 'admin123'.")
 	}
 	if os.Getenv("EXTENSION_SECRET_TOKEN") == "" {
-		log.Println("[SECURITY WARNING] EXTENSION_SECRET_TOKEN not set in environment. Defaulting to 'supersecret-gemini-token'.")
+		log.Println("[SECURITY WARNING] EXTENSION_SECRET_TOKEN not set in environment. Defaulting to 'supersecret-token'.")
 	}
 
 	// 1. Initialize persistent OAuth store
@@ -62,7 +62,7 @@ func main() {
 	// 5. Setup HTTP Router
 	mux := http.NewServeMux()
 
-	// Health check (Coolify)
+	// Health check (Coolify / Docker)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -141,7 +141,6 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		// Omit logging for periodic pings on /health to keep logs clean
 		if r.URL.Path != "/health" {
 			log.Printf("[%s] %s from %s took %v", r.Method, r.URL.Path, r.RemoteAddr, time.Since(start))
 		}
