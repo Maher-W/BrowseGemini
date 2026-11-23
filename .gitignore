@@ -1,0 +1,14 @@
+# Local tools & dependencies
+.tools/
+*.exe
+data/
+server/server.exe
+server/data/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.log
+.vscode/
+.idea/

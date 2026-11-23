@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Browser Connector</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-group">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+            <path d="M2 12h20"/>
+          </svg>
+        </div>
+        <div class="header-text">
+          <h1>Gemini Bridge</h1>
+          <span class="subtext">Chrome &harr; MCP Server</span>
+        </div>
+      </div>
+      <div id="statusBadge" class="status-badge status-off">
+        <span class="status-dot"></span>
+        <span id="statusText">OFF — Private</span>
+      </div>
+    </header>
+
+    <!-- Master Switch Card -->
+    <div class="card toggle-card">
+      <div class="toggle-info">
+        <span class="toggle-title">Live Gemini Control</span>
+        <span class="toggle-desc" id="toggleDescription">Extension is disabled. Gemini cannot see or interact with any tabs.</span>
+      </div>
+      <label class="switch" for="masterToggle" title="Toggle Live Gemini Browser Access">
+        <input type="checkbox" id="masterToggle">
+        <span class="slider round"></span>
+      </label>
+    </div>
+
+    <!-- Active Sessions Info -->
+    <div class="info-row" id="activeSessionsRow">
+      <span class="info-label">Active CDP Sessions:</span>
+      <span class="info-value" id="attachedTabsCount">0 tabs attached</span>
+    </div>
+
+    <!-- Settings Card -->
+    <div class="card settings-card">
+      <div class="settings-header">
+        <span class="settings-title">Connection Settings</span>
+      </div>
+      
+      <div class="form-group">
+        <label for="serverUrl">Remote Server WebSocket URL</label>
+        <div class="input-wrapper">
+          <input type="text" id="serverUrl" placeholder="wss://mcp.yourdomain.com/ws" spellcheck="false" autocomplete="off">
+        </div>
+        <small class="helper-text">Coolify WSS endpoint or ws://localhost:8080/ws</small>
+      </div>
+
+      <div class="form-group">
+        <label for="extensionToken">Extension Secret Token</label>
+        <div class="input-wrapper password-wrapper">
+          <input type="password" id="extensionToken" placeholder="Enter EXTENSION_SECRET_TOKEN" spellcheck="false" autocomplete="off">
+          <button type="button" id="toggleTokenVisibility" class="btn-icon" title="Toggle Token Visibility">
+            <svg id="eyeIcon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+        <small class="helper-text">Must match EXTENSION_SECRET_TOKEN in server .env</small>
+      </div>
+
+      <div class="button-group">
+        <button id="saveBtn" class="btn btn-primary">Save Settings</button>
+        <button id="reconnectBtn" class="btn btn-secondary">Reconnect Now</button>
+      </div>
+      <div id="saveFeedback" class="save-feedback"></div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span>When turned OFF, debug sessions detach and Gemini is locked out immediately.</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
