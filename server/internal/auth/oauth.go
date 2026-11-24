@@ -47,13 +47,23 @@ func (s *OAuthServer) resolveBaseURL(r *http.Request) string {
 	return fmt.Sprintf("%s://%s", scheme, host)
 }
 
-// 1. RFC 8414 OAuth 2.0 Authorization Server Metadata
-func (s *OAuthServer) HandleMetadata(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+// 1. RFC 9728 OAuth 2.0 Protected Resource Metadata
+func (s *OAuthServer) HandleProtectedResource(w http.ResponseWriter, r *http.Request) {
+	base := s.resolveBaseURL(r)
+
+	metadata := map[string]any{
+		"resource":                 base + "/mcp",
+		"authorization_servers":    []string{base},
+		"scopes_supported":         []string{"browser"},
+		"bearer_methods_supported": []string{"header"},
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(metadata)
+}
+
+// 2. RFC 8414 OAuth 2.0 Authorization Server Metadata
+func (s *OAuthServer) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 	base := s.resolveBaseURL(r)
 
 	metadata := map[string]any{
@@ -72,53 +82,58 @@ func (s *OAuthServer) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(metadata)
 }
 
-// 2. Dynamic Client Registration (RFC 7591)
-type RegisterRequest struct {
-	ClientName   string   `json:"client_name"`
-	RedirectURIs []string `json:"redirect_uris"`
-	GrantTypes   []string `json:"grant_types"`
-	ResponseTypes []string `json:"response_types"`
-	Scope        string   `json:"scope"`
-}
-
+// 3. Dynamic Client Registration (RFC 7591)
 func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var req RegisterRequest
+	var req map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid_request","error_description":"Malformed JSON body"}`, http.StatusBadRequest)
 		return
 	}
 
-	if len(req.RedirectURIs) == 0 {
-		http.Error(w, `{"error":"invalid_redirect_uri","error_description":"At least one redirect_uri required"}`, http.StatusBadRequest)
-		return
+	var redirectURIs []string
+	if rawURIs, ok := req["redirect_uris"].([]any); ok {
+		for _, u := range rawURIs {
+			if str, ok := u.(string); ok && str != "" {
+				redirectURIs = append(redirectURIs, str)
+			}
+		}
+	} else if singleURI, ok := req["redirect_uri"].(string); ok && singleURI != "" {
+		redirectURIs = append(redirectURIs, singleURI)
 	}
 
-	name := req.ClientName
-	if name == "" {
-		name = "Gemini Connected App"
+	if len(redirectURIs) == 0 {
+		redirectURIs = []string{
+			"https://vertexaisearch.cloud.google.com/oauth-redirect",
+			"https://gemini.google.com/oauth/callback",
+		}
 	}
 
-	client, err := s.store.RegisterClient(name, req.RedirectURIs)
+	name := "Google Gemini"
+	if n, ok := req["client_name"].(string); ok && n != "" {
+		name = n
+	}
+
+	client, err := s.store.RegisterClient(name, redirectURIs)
 	if err != nil {
 		http.Error(w, `{"error":"server_error"}`, http.StatusInternalServerError)
 		return
 	}
 
 	resp := map[string]any{
-		"client_id":                   client.ClientID,
-		"client_secret":               client.ClientSecret,
-		"client_name":                 client.ClientName,
-		"redirect_uris":               client.RedirectURIs,
-		"grant_types":                 []string{"authorization_code", "refresh_token"},
-		"response_types":              []string{"code"},
-		"token_endpoint_auth_method":  "client_secret_post",
-		"client_id_issued_at":         client.CreatedAt,
-		"client_secret_expires_at":    0,
+		"client_id":                  client.ClientID,
+		"client_secret":              client.ClientSecret,
+		"client_name":                client.ClientName,
+		"redirect_uris":              client.RedirectURIs,
+		"grant_types":                []string{"authorization_code", "refresh_token"},
+		"response_types":             []string{"code"},
+		"token_endpoint_auth_method": "client_secret_post",
+		"client_id_issued_at":        client.CreatedAt,
+		"client_secret_expires_at":   0,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -126,7 +141,7 @@ func (s *OAuthServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// 3. Authorization Endpoint (GET /authorize and POST /authorize)
+// 4. Authorization Endpoint (GET /authorize and POST /authorize)
 var loginTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -173,7 +188,7 @@ var loginTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE html>
       </svg>
     </div>
     <h1>Connect Google Gemini</h1>
-    <p>Google Gemini is requesting access to control your live Chrome browser via this MCP bridge.</p>
+    <p>Google Gemini is requesting access to control your live Chrome browser via BrowseGemini.</p>
 
     <div class="app-badge">
       <span>Requesting Client:</span>
@@ -303,7 +318,7 @@ func (s *OAuthServer) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 
-// 4. Token Endpoint (POST /token)
+// 5. Token Endpoint (POST /token)
 func (s *OAuthServer) HandleToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -321,12 +336,16 @@ func (s *OAuthServer) HandleToken(w http.ResponseWriter, r *http.Request) {
 		code := r.FormValue("code")
 		redirectURI := r.FormValue("redirect_uri")
 		clientID := r.FormValue("client_id")
+		clientSecret := r.FormValue("client_secret")
 		codeVerifier := r.FormValue("code_verifier")
 
 		// Also check Basic Auth for client_id if not in form
 		if clientID == "" {
-			if u, _, ok := r.BasicAuth(); ok {
+			if u, p, ok := r.BasicAuth(); ok {
 				clientID = u
+				if clientSecret == "" {
+					clientSecret = p
+				}
 			}
 		}
 
@@ -398,7 +417,6 @@ func (s *OAuthServer) HandleToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (t *TokenRecord) CreatedAt() int64 {
-	// 30 days window
 	return t.ExpiresAt - 30*24*3600
 }
 
@@ -425,21 +443,23 @@ func validatePKCE(verifier, challenge, method string) bool {
 	return subtle.ConstantTimeCompare([]byte(computed), []byte(challenge)) == 1
 }
 
-// 5. Middleware to validate Bearer token on /mcp
+// 6. Middleware to validate Bearer token on /mcp with RFC 9728 resource_metadata challenge
 func (s *OAuthServer) ValidateBearerToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		base := s.resolveBaseURL(r)
 		authHeader := r.Header.Get("Authorization")
+
 		if !strings.HasPrefix(authHeader, "Bearer ") {
-			log.Printf("[Auth] Missing or invalid Authorization header on %s", r.URL.Path)
-			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token", error_description="Bearer token required"`)
+			log.Printf("[Auth] Unauthenticated request on %s - returning RFC 9728 resource_metadata challenge", r.URL.Path)
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource"`, base))
 			http.Error(w, `{"error":"invalid_token","error_description":"Bearer token required"}`, http.StatusUnauthorized)
 			return
 		}
 
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		if !s.store.IsValidToken(token) {
-			log.Printf("[Auth] Token validation failed on %s", r.URL.Path)
-			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token", error_description="Token is expired or invalid"`)
+			log.Printf("[Auth] Invalid/expired token on %s", r.URL.Path)
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource", error="invalid_token"`, base))
 			http.Error(w, `{"error":"invalid_token","error_description":"Token is expired or invalid"}`, http.StatusUnauthorized)
 			return
 		}

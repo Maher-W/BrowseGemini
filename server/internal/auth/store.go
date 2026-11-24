@@ -53,7 +53,6 @@ type Store struct {
 func NewStore(dataDir string) (*Store, error) {
 	// Try creating dataDir if it doesn't exist
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		// Fallback to local ./data if dataDir is not writable (e.g. running on Windows without admin)
 		dataDir = "./data"
 		_ = os.MkdirAll(dataDir, 0755)
 	}
@@ -75,6 +74,23 @@ func NewStore(dataDir string) (*Store, error) {
 		log.Printf("[OAuth Store] Loaded %d clients and %d active tokens from %s",
 			len(store.data.Clients), len(store.data.Tokens), filePath)
 	}
+
+	// Ensure pre-registered static client for manual setup in Gemini
+	store.mu.Lock()
+	if _, exists := store.data.Clients["gemini"]; !exists {
+		store.data.Clients["gemini"] = Client{
+			ClientID:     "gemini",
+			ClientSecret: "gemini-secret",
+			ClientName:   "Google Gemini (Static Client)",
+			RedirectURIs: []string{
+				"https://vertexaisearch.cloud.google.com/oauth-redirect",
+				"https://gemini.google.com/oauth/callback",
+			},
+			CreatedAt: time.Now().Unix(),
+		}
+		_ = store.saveLocked()
+	}
+	store.mu.Unlock()
 
 	return store, nil
 }
@@ -198,7 +214,6 @@ func (s *Store) IssueToken(clientID, scope string) (*TokenRecord, error) {
 
 	accessToken := "mcp_at_" + randomHex(32)
 	refreshToken := "mcp_rt_" + randomHex(32)
-	// 30 days token expiry
 	expiresAt := time.Now().Add(30 * 24 * time.Hour).Unix()
 
 	record := TokenRecord{
