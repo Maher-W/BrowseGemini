@@ -30,7 +30,6 @@ type ExtensionResponse struct {
 }
 
 type Hub struct {
-	secretToken     string
 	adminPassword   string
 	upgrader        websocket.Upgrader
 	connMu          sync.Mutex
@@ -40,9 +39,8 @@ type Hub struct {
 	reqCounter      atomic.Int64
 }
 
-func NewHub(secretToken, adminPassword string) *Hub {
+func NewHub(adminPassword string) *Hub {
 	return &Hub{
-		secretToken:   secretToken,
 		adminPassword: adminPassword,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
@@ -68,16 +66,8 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Unified authentication: accept either ADMIN_PASSWORD or EXTENSION_SECRET_TOKEN
-	tokenValid := false
-	if h.adminPassword != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.adminPassword)) == 1 {
-		tokenValid = true
-	}
-	if h.secretToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.secretToken)) == 1 {
-		tokenValid = true
-	}
-
-	if !tokenValid {
+	// Validate against ADMIN_PASSWORD
+	if h.adminPassword == "" || subtle.ConstantTimeCompare([]byte(token), []byte(h.adminPassword)) != 1 {
 		log.Printf("[Hub] Unauthorized WebSocket attempt from %s", r.RemoteAddr)
 		http.Error(w, "Unauthorized: invalid password", http.StatusUnauthorized)
 		return

@@ -119,7 +119,7 @@ var homeTemplate = template.Must(template.New("home").Parse(`<!DOCTYPE html>
     <div class="info-title" style="margin-bottom: 10px;">Setup Instructions</div>
     <ol class="steps">
       <li><strong>Install Chrome Extension:</strong> Load <code>extension/</code> in Chrome (<code>chrome://extensions</code>).</li>
-      <li><strong>Configure Extension:</strong> Set Server URL to <code>{{.WsURL}}</code>, enter <code>EXTENSION_SECRET_TOKEN</code>, and toggle <strong>ON</strong>.</li>
+      <li><strong>Configure Extension:</strong> Enter your server domain and <code>ADMIN_PASSWORD</code>, allow device access, and toggle <strong>ON</strong>.</li>
       <li><strong>Connect Gemini:</strong> Go to <a href="https://gemini.google.com" target="_blank">gemini.google.com</a> &rarr; Settings &rarr; Connected apps &rarr; Add custom connected app.</li>
       <li><strong>Enter MCP URL:</strong> Paste <code>{{.BaseURL}}/mcp</code>. (If prompted for Client ID/Secret, enter <code>gemini</code> and <code>gemini-secret</code>).</li>
       <li><strong>Authorize:</strong> Enter your <code>ADMIN_PASSWORD</code> when prompted to finalize.</li>
@@ -147,13 +147,8 @@ func main() {
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	adminPassword := getEnv("ADMIN_PASSWORD", "admin123")
-	extensionToken := getEnv("EXTENSION_SECRET_TOKEN", "supersecret-token")
-
 	if os.Getenv("ADMIN_PASSWORD") == "" {
 		log.Println("[SECURITY WARNING] ADMIN_PASSWORD not set in environment. Defaulting to 'admin123'.")
-	}
-	if os.Getenv("EXTENSION_SECRET_TOKEN") == "" {
-		log.Println("[SECURITY WARNING] EXTENSION_SECRET_TOKEN not set in environment. Defaulting to 'supersecret-token'.")
 	}
 
 	// 1. Initialize persistent OAuth store
@@ -165,8 +160,8 @@ func main() {
 	// 2. Initialize OAuth Server
 	oauthServer := auth.NewOAuthServer(store, adminPassword, baseURL)
 
-	// 3. Initialize Chrome Extension WebSocket Hub with unified password support
-	extHub := hub.NewHub(extensionToken, adminPassword)
+	// 3. Initialize Chrome Extension WebSocket Hub (uses ADMIN_PASSWORD for auth)
+	extHub := hub.NewHub(adminPassword)
 
 	// 4. Initialize MCP Server with Streamable HTTP handler
 	mcpWrapper := mcpserver.NewServer(extHub)

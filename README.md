@@ -19,7 +19,7 @@ Gemini can view tabs, take screenshots, inspect interactive elements, click, dra
 └──────────────────┘                                            └───────────────────────┘
                                                                             ▲
                                                                             │ WSS WebSocket
-                                                                            │ + Secret Token
+                                                                            │ + Password Auth
                                                                             ▼
 ┌──────────────────┐          Chrome DevTools Protocol (CDP)    ┌───────────────────────┐
 │ Live Chrome Tabs │ ◄────────────────────────────────────────► │   Chrome Extension    │
@@ -28,6 +28,7 @@ Gemini can view tabs, take screenshots, inspect interactive elements, click, dra
 ```
 
 - **Ultra-lightweight:** Minimal Go binary inside Alpine Linux (~10MB RAM).
+- **Single password:** One `ADMIN_PASSWORD` is used for both Gemini OAuth login and Chrome Extension WebSocket authentication.
 - **Single-port multiplexing:** HTTP MCP transport, OAuth 2.0 discovery, and WebSockets all run on port `8080` (ready for Coolify, Docker, or reverse proxies with zero config).
 - **Privacy-first:** Master ON/OFF toggle in the extension popup immediately severs the WebSocket and detaches the debugger from all tabs.
 
@@ -49,7 +50,6 @@ go run ./cmd/server
 docker build -t browse-gemini .
 docker run -d -p 8080:8080 \
   -e ADMIN_PASSWORD="your-admin-password" \
-  -e EXTENSION_SECRET_TOKEN="your-extension-token" \
   -v browse-gemini-data:/data \
   browse-gemini
 ```
@@ -64,17 +64,17 @@ The server will be running on `http://localhost:8080`.
 2. Enable **Developer mode** (toggle in the top-right corner).
 3. Click **Load unpacked** and select the [`extension/`](extension/) directory from this repository.
 4. Click the **BrowseGemini** icon in your Chrome toolbar:
-   - **Server URL:** `ws://localhost:8080/ws` (or `wss://mcp.yourdomain.com/ws` if deployed remotely)
-   - **Extension Token:** Enter the `EXTENSION_SECRET_TOKEN` you set in the server configuration.
-   - Click **Save Settings**, then switch the **Live Gemini Control** toggle to **ON**.
-   - The status badge will change to **ON — Connected**.
+   - **Server Domain:** Enter your server domain (e.g. `browse.gemini.code.ebda3is.com` or `localhost:8080`)
+   - **Server Password:** Enter the same `ADMIN_PASSWORD` you set in the server configuration.
+   - **Allow Gemini on this device:** Check the box to authorize.
+   - Click **Connect & Save**. The status badge will change to **ON — Connected**.
 
 ---
 
 ### 3. Connect Google Gemini
 
 1. Go to [gemini.google.com](https://gemini.google.com).
-2. Open **Settings** ⚙️ &rarr; **Connected apps** &rarr; **Add custom connected app**.
+2. Open **Settings** ⚙️ → **Connected apps** → **Add custom connected app**.
 3. In the MCP Server URL input, enter:
    - For local running (via a tunnel like ngrok or cloudflared) or remote server:
      `https://mcp.yourdomain.com/mcp`
@@ -87,7 +87,7 @@ The server will be running on `http://localhost:8080`.
 ## ☁️ Deploying on a Remote Server (Coolify / Docker)
 
 ### Coolify Setup:
-1. In Coolify, create a new resource &rarr; **Git Repository** pointing to `https://github.com/Maher-W/BrowseGemini`.
+1. In Coolify, create a new resource → **Git Repository** pointing to `https://github.com/Maher-W/BrowseGemini`.
 2. Set **Build Pack** to **Dockerfile** and base directory to `server` (or Dockerfile path `server/Dockerfile`).
 3. Set **Exposed Port** to `8080`.
 4. Add a Persistent Storage mount:
@@ -100,7 +100,6 @@ The server will be running on `http://localhost:8080`.
    DATA_DIR=/data
    BASE_URL=https://mcp.yourdomain.com
    ADMIN_PASSWORD=choose-a-strong-password
-   EXTENSION_SECRET_TOKEN=choose-a-random-secret
    ```
 6. Deploy! Coolify automatically sets up HTTPS and WebSocket (`wss://`) routing.
 
@@ -126,9 +125,8 @@ The server will be running on `http://localhost:8080`.
 ## 🔒 Security & Privacy
 
 - **No Data Shared When OFF:** When toggled OFF in the extension popup, the WebSocket disconnects, all CDP sessions detach, Chrome's debugging banner disappears, and Gemini cannot access any tabs.
-- **Two-Layer Auth:**
-  1. Google Gemini requires OAuth 2.0 authentication against your `ADMIN_PASSWORD`.
-  2. The Chrome extension requires `EXTENSION_SECRET_TOKEN` to communicate over WebSocket.
+- **Single Password Auth:** One `ADMIN_PASSWORD` is used for both Google Gemini OAuth login and Chrome Extension WebSocket authentication.
+- **Device Authorization:** The Chrome extension includes a device-level permission toggle — Gemini cannot interact with tabs unless you explicitly allow it.
 - **No Third-Party Telemetry:** BrowseGemini is 100% self-hosted and independent.
 
 ---
