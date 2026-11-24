@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -140,6 +141,11 @@ func main() {
 	host := getEnv("HOST", "0.0.0.0")
 	dataDir := getEnv("DATA_DIR", "/data")
 	baseURL := getEnv("BASE_URL", "")
+	baseURL = strings.TrimSpace(baseURL)
+	for strings.Contains(baseURL, "..") {
+		baseURL = strings.ReplaceAll(baseURL, "..", ".")
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
 	adminPassword := getEnv("ADMIN_PASSWORD", "admin123")
 	extensionToken := getEnv("EXTENSION_SECRET_TOKEN", "supersecret-token")
 

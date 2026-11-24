@@ -19,17 +19,25 @@ type OAuthServer struct {
 	baseURL       string
 }
 
+func sanitizeURL(u string) string {
+	u = strings.TrimSpace(u)
+	for strings.Contains(u, "..") {
+		u = strings.ReplaceAll(u, "..", ".")
+	}
+	return strings.TrimSuffix(u, "/")
+}
+
 func NewOAuthServer(store *Store, adminPassword, baseURL string) *OAuthServer {
 	return &OAuthServer{
 		store:         store,
 		adminPassword: adminPassword,
-		baseURL:       strings.TrimSuffix(baseURL, "/"),
+		baseURL:       sanitizeURL(baseURL),
 	}
 }
 
 func (s *OAuthServer) resolveBaseURL(r *http.Request) string {
 	if s.baseURL != "" {
-		return s.baseURL
+		return sanitizeURL(s.baseURL)
 	}
 
 	scheme := "http"
@@ -44,7 +52,7 @@ func (s *OAuthServer) resolveBaseURL(r *http.Request) string {
 		host = fHost
 	}
 
-	return fmt.Sprintf("%s://%s", scheme, host)
+	return sanitizeURL(fmt.Sprintf("%s://%s", scheme, host))
 }
 
 // 1. RFC 9728 OAuth 2.0 Protected Resource Metadata
