@@ -18,34 +18,17 @@ chrome.runtime.onInstalled.addListener(() => {
   initFromStorage();
 });
 
-// URL Normalizer: converts domain or http/https to wss://.../ws
-// Forces wss:// for all non-localhost domains (HTTPS servers reject ws://)
-function normalizeWebSocketUrl(rawUrl) {
-  let u = (rawUrl || "").trim();
-  if (!u) return "";
-  // Strip any existing protocol and re-add the right one
-  if (u.startsWith("https://")) {
-    u = u.slice(8);
-  } else if (u.startsWith("http://")) {
-    u = u.slice(7);
-  } else if (u.startsWith("wss://")) {
-    u = u.slice(6);
-  } else if (u.startsWith("ws://")) {
-    u = u.slice(5);
-  }
-  // Determine protocol: ws:// only for localhost/127.0.0.1, wss:// for everything else
-  const isLocal = u.startsWith("localhost") || u.startsWith("127.0.0.1");
+// Build WebSocket URL from a plain domain (or domain:port)
+// background.js is the only place that constructs the full wss:// URL
+function buildWebSocketUrl(domain) {
+  let d = (domain || "").trim();
+  if (!d) return "";
+  // Strip any protocols or paths the user may have pasted
+  d = d.replace(/^(https?|wss?):\/\//i, "");
+  d = d.split("/")[0]; // keep only host:port
+  const isLocal = d.startsWith("localhost") || d.startsWith("127.0.0.1");
   const protocol = isLocal ? "ws://" : "wss://";
-  u = protocol + u;
-  try {
-    const parsed = new URL(u);
-    if (!parsed.pathname || parsed.pathname === "/" || parsed.pathname === "/mcp") {
-      parsed.pathname = "/ws";
-    }
-    return parsed.toString();
-  } catch (e) {
-    return u;
-  }
+  return protocol + d + "/ws";
 }
 
 async function initFromStorage() {
@@ -205,10 +188,10 @@ async function connectWebSocket(serverUrl, token) {
   lastErrorMessage = "";
   hadHandshakeError = false;
 
-  const normalizedUrl = normalizeWebSocketUrl(serverUrl);
-  let finalUrl = normalizedUrl;
+  const wsUrl = buildWebSocketUrl(serverUrl);
+  let finalUrl = wsUrl;
   try {
-    const parsed = new URL(normalizedUrl);
+    const parsed = new URL(wsUrl);
     if (token) {
       parsed.searchParams.set("token", token);
     }
@@ -229,7 +212,7 @@ async function connectWebSocket(serverUrl, token) {
   }
 
   ws.onopen = () => {
-    console.log("WebSocket connected to MCP server:", normalizedUrl);
+    console.log("WebSocket connected to MCP server:", wsUrl);
     currentStatus = "connected";
     lastErrorMessage = "";
     reconnectAttempts = 0;

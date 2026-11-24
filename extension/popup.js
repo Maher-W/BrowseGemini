@@ -30,41 +30,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   const cancelBtn = document.getElementById("cancelBtn");
   const saveFeedback = document.getElementById("saveFeedback");
 
-  // URL normalizer: converts domain or http/https to wss://.../ws
-  // Forces wss:// for all non-localhost domains
-  function normalizeWebSocketUrl(rawUrl) {
-    let u = (rawUrl || "").trim();
-    if (!u) return "";
-    if (u.startsWith("https://")) {
-      u = u.slice(8);
-    } else if (u.startsWith("http://")) {
-      u = u.slice(7);
-    } else if (u.startsWith("wss://")) {
-      u = u.slice(6);
-    } else if (u.startsWith("ws://")) {
-      u = u.slice(5);
-    }
-    const isLocal = u.startsWith("localhost") || u.startsWith("127.0.0.1");
-    const protocol = isLocal ? "ws://" : "wss://";
-    u = protocol + u;
-    try {
-      const parsed = new URL(u);
-      if (!parsed.pathname || parsed.pathname === "/" || parsed.pathname === "/mcp") {
-        parsed.pathname = "/ws";
-      }
-      return parsed.toString();
-    } catch (e) {
-      return u;
-    }
+  // Strip a raw input down to just the domain (host + optional port)
+  function cleanDomain(raw) {
+    let u = (raw || "").trim();
+    // Strip protocols
+    u = u.replace(/^(https?|wss?):\/\//i, "");
+    // Strip paths like /ws or /mcp
+    u = u.split("/")[0];
+    return u;
   }
 
-  function extractHost(urlStr) {
-    try {
-      const parsed = new URL(urlStr);
-      return parsed.hostname || urlStr;
-    } catch (e) {
-      return urlStr.replace(/^wss?:\/\//i, "").split("/")[0] || urlStr;
-    }
+  function extractHost(urlOrDomain) {
+    // Already a clean domain
+    return (urlOrDomain || "").replace(/^(https?|wss?):\/\//i, "").split("/")[0];
   }
 
   // Load configuration from local storage
@@ -107,7 +85,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       setupTitle.textContent = "Server Setup & Sign-In";
     }
 
-    serverUrlInput.value = cfg.serverUrl || "browse.gemini.code.ebda3is.com";
+    serverUrlInput.value = extractHost(cfg.serverUrl) || "";
     serverPasswordInput.value = cfg.token || "";
     setupDeviceAllowed.checked = cfg.deviceAllowed !== undefined ? !!cfg.deviceAllowed : true;
   }
@@ -278,7 +256,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const deviceAllowed = setupDeviceAllowed.checked;
 
     if (!rawUrl) {
-      showFeedback("Please enter your server URL or domain", true);
+      showFeedback("Please enter your server domain", true);
       return;
     }
 
@@ -292,11 +270,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    const normalizedUrl = normalizeWebSocketUrl(rawUrl);
+    // Store just the clean domain — background.js builds the wss:// URL
+    const domain = cleanDomain(rawUrl);
 
-    // Save configuration
     await chrome.storage.local.set({
-      serverUrl: normalizedUrl,
+      serverUrl: domain,
       token: password,
       deviceAllowed: true,
       enabled: true
@@ -304,16 +282,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     showFeedback("Saved! Connecting...", false);
 
-    // Switch to paired view immediately
     const updatedCfg = {
-      serverUrl: normalizedUrl,
+      serverUrl: domain,
       token: password,
       deviceAllowed: true,
       enabled: true
     };
     showPairedView(updatedCfg);
 
-    // Trigger reconnect
     try {
       await chrome.runtime.sendMessage({ type: "reconnect" });
     } catch (e) {}
