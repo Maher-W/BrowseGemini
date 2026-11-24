@@ -1,5 +1,5 @@
 # Stage 1: Build static Go binary
-FROM golang:1.24-alpine AS builder
+FROM golang:alpine AS builder
 
 WORKDIR /app
 
@@ -12,13 +12,13 @@ RUN go mod download
 # Copy source tree
 COPY server/ .
 
-# Compile stripped static binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+# Compile stripped static binary (auto-detects architecture: amd64 / arm64)
+RUN CGO_ENABLED=0 go build \
     -ldflags="-s -w -extldflags '-static'" \
     -o /app/browse-gemini ./cmd/server
 
 # Stage 2: Minimal runtime image (~10MB RAM footprint)
-FROM alpine:3.21
+FROM alpine:latest
 
 # ca-certificates for outbound TLS, tzdata for proper timestamps
 RUN apk --no-cache add ca-certificates tzdata
