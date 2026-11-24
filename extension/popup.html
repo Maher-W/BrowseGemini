@@ -25,66 +25,122 @@
       </div>
       <div id="statusBadge" class="status-badge status-off">
         <span class="status-dot"></span>
-        <span id="statusText">OFF — Private</span>
+        <span id="statusText">OFF</span>
       </div>
     </header>
 
-    <!-- Master Switch Card -->
-    <div class="card toggle-card">
-      <div class="toggle-info">
-        <span class="toggle-title">Live Gemini Control</span>
-        <span class="toggle-desc" id="toggleDescription">Extension is disabled. Gemini cannot see or interact with any tabs.</span>
-      </div>
-      <label class="switch" for="masterToggle" title="Toggle Live Gemini Browser Access">
-        <input type="checkbox" id="masterToggle">
-        <span class="slider round"></span>
-      </label>
+    <!-- Error Banner (hidden by default) -->
+    <div id="errorBanner" class="error-banner hidden">
+      <div class="error-icon">⚠️</div>
+      <div class="error-text" id="errorMessage">Connection failed. Check your password.</div>
     </div>
 
-    <!-- Active Sessions Info -->
-    <div class="info-row" id="activeSessionsRow">
-      <span class="info-label">Active CDP Sessions:</span>
-      <span class="info-value" id="attachedTabsCount">0 tabs attached</span>
-    </div>
-
-    <!-- Settings Card -->
-    <div class="card settings-card">
-      <div class="settings-header">
-        <span class="settings-title">Connection Settings</span>
-      </div>
-      
-      <div class="form-group">
-        <label for="serverUrl">Remote Server WebSocket URL</label>
-        <div class="input-wrapper">
-          <input type="text" id="serverUrl" placeholder="wss://mcp.yourdomain.com/ws" spellcheck="false" autocomplete="off">
+    <!-- PAIRED / ACTIVE VIEW (Shown after signing in) -->
+    <div id="pairedView" class="view-panel">
+      <!-- Master Switch Card -->
+      <div class="card toggle-card">
+        <div class="toggle-info">
+          <span class="toggle-title">Live Gemini Control</span>
+          <span class="toggle-desc" id="toggleDescription">Gemini can interact with authorized browser tabs.</span>
         </div>
-        <small class="helper-text">Server WSS endpoint or ws://localhost:8080/ws</small>
+        <label class="switch" for="masterToggle" title="Toggle Live Gemini Browser Access">
+          <input type="checkbox" id="masterToggle">
+          <span class="slider round"></span>
+        </label>
       </div>
 
-      <div class="form-group">
-        <label for="extensionToken">Extension Secret Token</label>
-        <div class="input-wrapper password-wrapper">
-          <input type="password" id="extensionToken" placeholder="Enter EXTENSION_SECRET_TOKEN" spellcheck="false" autocomplete="off">
-          <button type="button" id="toggleTokenVisibility" class="btn-icon" title="Toggle Token Visibility">
-            <svg id="eyeIcon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-              <circle cx="12" cy="12" r="3"/>
+      <!-- Device Permission Card -->
+      <div class="card device-perm-card">
+        <div class="device-perm-header">
+          <div class="perm-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
             </svg>
-          </button>
+          </div>
+          <div class="perm-info">
+            <span class="perm-title">Allow Gemini on this Device</span>
+            <span class="perm-desc">Authorize Gemini to view and control tabs</span>
+          </div>
+          <label class="switch switch-sm" for="deviceAllowedToggle" title="Allow Gemini access on this device">
+            <input type="checkbox" id="deviceAllowedToggle">
+            <span class="slider round"></span>
+          </label>
         </div>
-        <small class="helper-text">Must match EXTENSION_SECRET_TOKEN in server .env</small>
+        <div class="perm-status" id="permStatusBadge">
+          <span class="badge-dot"></span>
+          <span id="permStatusText">Device Authorized</span>
+        </div>
       </div>
 
-      <div class="button-group">
-        <button id="saveBtn" class="btn btn-primary">Save Settings</button>
-        <button id="reconnectBtn" class="btn btn-secondary">Reconnect Now</button>
+      <!-- Server & Sessions Info Card -->
+      <div class="card info-card">
+        <div class="info-item">
+          <span class="info-label">Connected Server:</span>
+          <span class="info-value server-host" id="connectedServerHost">—</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Active CDP Sessions:</span>
+          <span class="info-value" id="attachedTabsCount">0 tabs attached</span>
+        </div>
       </div>
-      <div id="saveFeedback" class="save-feedback"></div>
+
+      <!-- Quick Actions -->
+      <div class="paired-actions">
+        <button id="editSettingsBtn" class="btn btn-secondary btn-sm">⚙️ Change Server / Password</button>
+        <button id="reconnectBtn" class="btn btn-secondary btn-sm">🔄 Reconnect</button>
+      </div>
+    </div>
+
+    <!-- SETUP / SIGN-IN VIEW (Shown when pairing or editing settings) -->
+    <div id="setupView" class="view-panel hidden">
+      <div class="card settings-card">
+        <div class="settings-header">
+          <span class="settings-title" id="setupTitle">Server Setup</span>
+        </div>
+
+        <div class="form-group">
+          <label for="serverUrl">Server Domain or URL</label>
+          <div class="input-wrapper">
+            <input type="text" id="serverUrl" placeholder="browse.gemini.code.ebda3is.com" spellcheck="false" autocomplete="off">
+          </div>
+          <small class="helper-text">Domain or URL (automatically connects via wss://.../ws)</small>
+        </div>
+
+        <div class="form-group">
+          <label for="serverPassword">Server Password</label>
+          <div class="input-wrapper password-wrapper">
+            <input type="password" id="serverPassword" placeholder="Enter your server password" spellcheck="false" autocomplete="off">
+            <button type="button" id="togglePasswordVisibility" class="btn-icon" title="Toggle Password Visibility">
+              <svg id="eyeIcon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+          <small class="helper-text">Same password used when logging in with Gemini</small>
+        </div>
+
+        <div class="checkbox-group">
+          <label class="checkbox-label" for="setupDeviceAllowed">
+            <input type="checkbox" id="setupDeviceAllowed" checked>
+            <span>Allow Gemini to connect to this device</span>
+          </label>
+          <small class="helper-text ml-check">Required for Gemini to control browser tabs</small>
+        </div>
+
+        <div class="button-group">
+          <button id="saveBtn" class="btn btn-primary">Connect & Save</button>
+          <button id="cancelBtn" class="btn btn-secondary hidden">Cancel</button>
+        </div>
+        <div id="saveFeedback" class="save-feedback"></div>
+      </div>
     </div>
 
     <!-- Footer -->
     <footer class="footer">
-      <span>When turned OFF, debug sessions detach and Gemini is locked out immediately.</span>
+      <span>When turned OFF or disconnected, Gemini is completely locked out.</span>
     </footer>
   </div>
 

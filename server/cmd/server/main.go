@@ -165,8 +165,8 @@ func main() {
 	// 2. Initialize OAuth Server
 	oauthServer := auth.NewOAuthServer(store, adminPassword, baseURL)
 
-	// 3. Initialize Chrome Extension WebSocket Hub
-	extHub := hub.NewHub(extensionToken)
+	// 3. Initialize Chrome Extension WebSocket Hub with unified password support
+	extHub := hub.NewHub(extensionToken, adminPassword)
 
 	// 4. Initialize MCP Server with Streamable HTTP handler
 	mcpWrapper := mcpserver.NewServer(extHub)

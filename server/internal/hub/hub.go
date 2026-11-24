@@ -31,6 +31,7 @@ type ExtensionResponse struct {
 
 type Hub struct {
 	secretToken     string
+	adminPassword   string
 	upgrader        websocket.Upgrader
 	connMu          sync.Mutex
 	currentConn     *websocket.Conn
@@ -39,12 +40,12 @@ type Hub struct {
 	reqCounter      atomic.Int64
 }
 
-func NewHub(secretToken string) *Hub {
+func NewHub(secretToken, adminPassword string) *Hub {
 	return &Hub{
-		secretToken: secretToken,
+		secretToken:   secretToken,
+		adminPassword: adminPassword,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
-				// Allow all origins since Chrome extension runs from chrome-extension://
 				return true
 			},
 			ReadBufferSize:  1024 * 64,
@@ -67,9 +68,18 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if subtle.ConstantTimeCompare([]byte(token), []byte(h.secretToken)) != 1 {
+	// Unified authentication: accept either ADMIN_PASSWORD or EXTENSION_SECRET_TOKEN
+	tokenValid := false
+	if h.adminPassword != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.adminPassword)) == 1 {
+		tokenValid = true
+	}
+	if h.secretToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.secretToken)) == 1 {
+		tokenValid = true
+	}
+
+	if !tokenValid {
 		log.Printf("[Hub] Unauthorized WebSocket attempt from %s", r.RemoteAddr)
-		http.Error(w, "Unauthorized: invalid secret token", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized: invalid password", http.StatusUnauthorized)
 		return
 	}
 
@@ -103,7 +113,6 @@ func (h *Hub) readPump(conn *websocket.Conn) {
 		if h.currentConn == conn {
 			h.currentConn = nil
 			h.isConnected.Store(false)
-			// Drain and fail any pending requests
 			h.failAllPending("Chrome extension disconnected")
 		}
 		h.connMu.Unlock()
@@ -212,7 +221,6 @@ func (h *Hub) SendCommand(ctx context.Context, action string, params any) (*Exte
 		return nil, fmt.Errorf("failed to send command to extension: %w", err)
 	}
 
-	// Wait for response or context timeout (default 30s)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

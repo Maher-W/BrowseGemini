@@ -2,10 +2,11 @@
 
 // State
 let ws = null;
-let currentStatus = "off"; // "off" | "connecting" | "connected" | "error"
+let currentStatus = "off"; // "off" | "connecting" | "connected" | "error" | "blocked"
 let lastErrorMessage = "";
 let reconnectTimer = null;
 let reconnectAttempts = 0;
+let hadHandshakeError = false;
 const attachedTabs = new Map(); // tabId -> boolean
 
 // Initialize on service worker startup
@@ -17,18 +18,41 @@ chrome.runtime.onInstalled.addListener(() => {
   initFromStorage();
 });
 
+// URL Normalizer: converts domain or http/https to wss://.../ws
+function normalizeWebSocketUrl(rawUrl) {
+  let u = (rawUrl || "").trim();
+  if (!u) return "";
+  if (u.startsWith("https://")) {
+    u = "wss://" + u.slice(8);
+  } else if (u.startsWith("http://")) {
+    u = "ws://" + u.slice(7);
+  } else if (!u.startsWith("ws://") && !u.startsWith("wss://")) {
+    u = "wss://" + u;
+  }
+  try {
+    const parsed = new URL(u);
+    if (!parsed.pathname || parsed.pathname === "/" || parsed.pathname === "/mcp") {
+      parsed.pathname = "/ws";
+    }
+    return parsed.toString();
+  } catch (e) {
+    return u;
+  }
+}
+
 async function initFromStorage() {
   const config = await chrome.storage.local.get({
     enabled: false,
-    serverUrl: "ws://localhost:8080/ws",
+    deviceAllowed: false,
+    serverUrl: "",
     token: ""
   });
 
-  if (config.enabled) {
+  if (config.enabled && config.deviceAllowed && config.serverUrl) {
     connectWebSocket(config.serverUrl, config.token);
     startKeepAlive();
   } else {
-    currentStatus = "off";
+    currentStatus = config.enabled && !config.deviceAllowed ? "blocked" : "off";
     stopKeepAlive();
     detachAllDebuggers();
   }
@@ -127,7 +151,34 @@ async function resolveTargetTab(tabId) {
 }
 
 // WebSocket Connection Manager
-function connectWebSocket(serverUrl, token) {
+async function connectWebSocket(serverUrl, token) {
+  const { enabled, deviceAllowed } = await chrome.storage.local.get({
+    enabled: false,
+    deviceAllowed: false
+  });
+
+  if (!enabled) {
+    currentStatus = "off";
+    lastErrorMessage = "";
+    if (ws) {
+      try { ws.close(); } catch (e) {}
+      ws = null;
+    }
+    detachAllDebuggers();
+    return;
+  }
+
+  if (!deviceAllowed) {
+    currentStatus = "blocked";
+    lastErrorMessage = "Device not authorized. Check 'Allow Gemini' in settings.";
+    if (ws) {
+      try { ws.close(); } catch (e) {}
+      ws = null;
+    }
+    detachAllDebuggers();
+    return;
+  }
+
   if (ws) {
     try {
       ws.onclose = null;
@@ -144,18 +195,19 @@ function connectWebSocket(serverUrl, token) {
 
   currentStatus = "connecting";
   lastErrorMessage = "";
+  hadHandshakeError = false;
 
-  // Append token to query parameter for browser WebSocket standard compliance
-  let finalUrl = serverUrl;
+  const normalizedUrl = normalizeWebSocketUrl(serverUrl);
+  let finalUrl = normalizedUrl;
   try {
-    const parsed = new URL(serverUrl);
+    const parsed = new URL(normalizedUrl);
     if (token) {
       parsed.searchParams.set("token", token);
     }
     finalUrl = parsed.toString();
   } catch (e) {
     currentStatus = "error";
-    lastErrorMessage = "Invalid Server URL format";
+    lastErrorMessage = "Invalid server URL format";
     return;
   }
 
@@ -163,16 +215,17 @@ function connectWebSocket(serverUrl, token) {
     ws = new WebSocket(finalUrl);
   } catch (e) {
     currentStatus = "error";
-    lastErrorMessage = e.message;
+    lastErrorMessage = e.message || "Failed to create WebSocket connection";
     scheduleReconnect();
     return;
   }
 
   ws.onopen = () => {
-    console.log("WebSocket connected to MCP server.");
+    console.log("WebSocket connected to MCP server:", normalizedUrl);
     currentStatus = "connected";
     lastErrorMessage = "";
     reconnectAttempts = 0;
+    hadHandshakeError = false;
 
     // Send hello handshake
     ws.send(JSON.stringify({
@@ -192,7 +245,6 @@ function connectWebSocket(serverUrl, token) {
       return;
     }
 
-    // Handle heartbeats
     if (msg.type === "ping") {
       ws.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
       return;
@@ -202,44 +254,54 @@ function connectWebSocket(serverUrl, token) {
       return;
     }
 
-    // Handle MCP tool invocation request
     if (msg.id && msg.action) {
       handleToolRequest(msg);
     }
   };
 
+  ws.onerror = (err) => {
+    console.warn("WebSocket error:", err);
+    hadHandshakeError = true;
+    currentStatus = "error";
+    lastErrorMessage = "Connection rejected. Verify server URL and password.";
+  };
+
   ws.onclose = (event) => {
     console.log(`WebSocket closed: code=${event.code}, reason=${event.reason}`);
     ws = null;
-    chrome.storage.local.get({ enabled: false }, (cfg) => {
-      if (cfg.enabled) {
-        currentStatus = "connecting";
-        scheduleReconnect();
-      } else {
+    chrome.storage.local.get({ enabled: false, deviceAllowed: false }, (cfg) => {
+      if (!cfg.enabled) {
         currentStatus = "off";
+        lastErrorMessage = "";
         detachAllDebuggers();
+        return;
       }
-    });
-  };
+      if (!cfg.deviceAllowed) {
+        currentStatus = "blocked";
+        lastErrorMessage = "Device access not allowed.";
+        detachAllDebuggers();
+        return;
+      }
 
-  ws.onerror = (err) => {
-    console.warn("WebSocket error:", err);
-    currentStatus = "error";
-    lastErrorMessage = "Connection failed";
+      if (hadHandshakeError) {
+        currentStatus = "error";
+      } else {
+        currentStatus = "connecting";
+      }
+      scheduleReconnect();
+    });
   };
 }
 
 function scheduleReconnect() {
-  chrome.storage.local.get({ enabled: false, serverUrl: "", token: "" }, (cfg) => {
-    if (!cfg.enabled) {
-      currentStatus = "off";
+  chrome.storage.local.get({ enabled: false, deviceAllowed: false, serverUrl: "", token: "" }, (cfg) => {
+    if (!cfg.enabled || !cfg.deviceAllowed) {
       return;
     }
 
     reconnectAttempts++;
-    // Exponential backoff: 1s, 2s, 4s, 8s, up to 30s
-    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 30000);
-    console.log(`Scheduling reconnect attempt ${reconnectAttempts} in ${delay}ms...`);
+    const delay = Math.min(1500 * Math.pow(1.5, reconnectAttempts - 1), 30000);
+    console.log(`Scheduling reconnect attempt ${reconnectAttempts} in ${Math.round(delay)}ms...`);
 
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(() => {
@@ -254,10 +316,17 @@ async function handleToolRequest(request) {
   const { id, action, params = {} } = request;
 
   try {
-    // Check if enabled in storage
-    const { enabled } = await chrome.storage.local.get({ enabled: false });
+    const { enabled, deviceAllowed } = await chrome.storage.local.get({
+      enabled: false,
+      deviceAllowed: false
+    });
+
     if (!enabled) {
-      throw new Error("Chrome extension is currently toggled OFF. Ask the user to enable it in their browser.");
+      throw new Error("BrowseGemini is currently toggled OFF in Chrome.");
+    }
+
+    if (!deviceAllowed) {
+      throw new Error("Gemini is not authorized to connect to this device. Please allow access in the BrowseGemini extension.");
     }
 
     let result;
@@ -353,7 +422,6 @@ async function handleBrowserTabs(params) {
 
   if (action === "close") {
     if (!tabId) throw new Error("tabId is required for 'close' action");
-    // Detach debugger if attached
     if (attachedTabs.has(tabId)) {
       try {
         await chrome.debugger.detach({ tabId });
@@ -372,7 +440,6 @@ async function handleBrowserScreenshot(params) {
   const targetTab = await resolveTargetTab(params.tabId);
   await ensureDebuggerAttached(targetTab.id);
 
-  // Capture screenshot via CDP
   const result = await chrome.debugger.sendCommand(
     { tabId: targetTab.id },
     "Page.captureScreenshot",
@@ -381,7 +448,6 @@ async function handleBrowserScreenshot(params) {
 
   let base64Data = result.data;
 
-  // Retrieve current viewport dimensions
   const layout = await chrome.debugger.sendCommand(
     { tabId: targetTab.id },
     "Page.getLayoutMetrics"
@@ -390,7 +456,6 @@ async function handleBrowserScreenshot(params) {
   let width = layout.cssVisualViewport ? layout.cssVisualViewport.clientWidth : 1280;
   let height = layout.cssVisualViewport ? layout.cssVisualViewport.clientHeight : 720;
 
-  // Resize using OffscreenCanvas if width > 1280px to keep coordinates aligned and save bandwidth
   try {
     const binaryStr = atob(base64Data);
     const bytes = new Uint8Array(binaryStr.length);
@@ -414,7 +479,6 @@ async function handleBrowserScreenshot(params) {
       ctx.drawImage(bitmap, 0, 0, targetW, targetH);
       const resizedBlob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 });
 
-      // Convert back to base64
       const reader = new FileReader();
       base64Data = await new Promise((resolve, reject) => {
         reader.onloadend = () => {
@@ -441,7 +505,7 @@ async function handleBrowserScreenshot(params) {
     title: targetTab.title,
     width: Math.round(width),
     height: Math.round(height),
-    image: base64Data // pure base64 JPEG
+    image: base64Data
   };
 }
 
@@ -462,7 +526,6 @@ async function handleBrowserGetElements(params) {
     let idx = 0;
 
     for (const el of elements) {
-      // Check visibility
       const rect = el.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) continue;
       if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
@@ -471,7 +534,6 @@ async function handleBrowserGetElements(params) {
       const style = window.getComputedStyle(el);
       if (style.visibility === 'hidden' || style.display === 'none' || style.opacity === '0') continue;
 
-      // Extract text content or accessible label
       let text = el.innerText || el.textContent || '';
       if (!text.trim()) {
         text = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('title') || el.value || el.name || '';
@@ -493,7 +555,7 @@ async function handleBrowserGetElements(params) {
         role: el.getAttribute('role') || undefined,
         disabled: el.disabled || el.getAttribute('aria-disabled') === 'true'
       });
-      if (results.length >= 150) break; // prevent overload
+      if (results.length >= 150) break;
     }
     return results;
   })()`;
@@ -518,7 +580,7 @@ async function handleBrowserGetElements(params) {
   };
 }
 
-// 4. browser_click: trusted Input.dispatchMouseEvent (move, press, release)
+// 4. browser_click: trusted Input.dispatchMouseEvent
 async function handleBrowserClick(params) {
   const { x, y, button = "left", clickCount = 1 } = params;
   if (x === undefined || y === undefined) {
@@ -531,14 +593,12 @@ async function handleBrowserClick(params) {
   const btn = button.toLowerCase();
   const cCount = clickCount || 1;
 
-  // 1. Move to target
   await chrome.debugger.sendCommand({ tabId: targetTab.id }, "Input.dispatchMouseEvent", {
     type: "mouseMoved",
     x,
     y
   });
 
-  // 2. Press
   await chrome.debugger.sendCommand({ tabId: targetTab.id }, "Input.dispatchMouseEvent", {
     type: "mousePressed",
     x,
@@ -547,7 +607,6 @@ async function handleBrowserClick(params) {
     clickCount: cCount
   });
 
-  // 3. Release
   await chrome.debugger.sendCommand({ tabId: targetTab.id }, "Input.dispatchMouseEvent", {
     type: "mouseReleased",
     x,
@@ -556,7 +615,6 @@ async function handleBrowserClick(params) {
     clickCount: cCount
   });
 
-  // If double click requested, dispatch second click
   if (cCount === 2) {
     await chrome.debugger.sendCommand({ tabId: targetTab.id }, "Input.dispatchMouseEvent", {
       type: "mousePressed",
@@ -596,7 +654,7 @@ async function handleBrowserMoveMouse(params) {
   return { moved: true, x, y };
 }
 
-// 6. browser_drag: start -> mouse down -> intermediate moves -> end -> mouse release
+// 6. browser_drag
 async function handleBrowserDrag(params) {
   const { startX, startY, endX, endY } = params;
   if (startX === undefined || startY === undefined || endX === undefined || endY === undefined) {
@@ -606,14 +664,12 @@ async function handleBrowserDrag(params) {
   const targetTab = await resolveTargetTab(params.tabId);
   await ensureDebuggerAttached(targetTab.id);
 
-  // Move to start
   await chrome.debugger.sendCommand({ tabId: targetTab.id }, "Input.dispatchMouseEvent", {
     type: "mouseMoved",
     x: startX,
     y: startY
   });
 
-  // Press down
   await chrome.debugger.sendCommand({ tabId: targetTab.id }, "Input.dispatchMouseEvent", {
     type: "mousePressed",
     x: startX,
@@ -622,7 +678,6 @@ async function handleBrowserDrag(params) {
     clickCount: 1
   });
 
-  // Smooth intermediate steps
   const steps = 8;
   for (let i = 1; i <= steps; i++) {
     const curX = Math.round(startX + ((endX - startX) * i) / steps);
@@ -635,7 +690,6 @@ async function handleBrowserDrag(params) {
     });
   }
 
-  // Release
   await chrome.debugger.sendCommand({ tabId: targetTab.id }, "Input.dispatchMouseEvent", {
     type: "mouseReleased",
     x: endX,
@@ -647,7 +701,7 @@ async function handleBrowserDrag(params) {
   return { dragged: true, from: { x: startX, y: startY }, to: { x: endX, y: endY } };
 }
 
-// 7. browser_scroll: mouseWheel
+// 7. browser_scroll
 async function handleBrowserScroll(params) {
   const { x = 640, y = 360, deltaX = 0, deltaY = 0 } = params;
 
@@ -665,7 +719,7 @@ async function handleBrowserScroll(params) {
   return { scrolled: true, x, y, deltaX, deltaY };
 }
 
-// 8. browser_type: Input.insertText + optional Enter key
+// 8. browser_type
 async function handleBrowserType(params) {
   const { text, pressEnter = false } = params;
   if (text === undefined) {
@@ -675,12 +729,10 @@ async function handleBrowserType(params) {
   const targetTab = await resolveTargetTab(params.tabId);
   await ensureDebuggerAttached(targetTab.id);
 
-  // Insert text directly
   await chrome.debugger.sendCommand({ tabId: targetTab.id }, "Input.insertText", {
     text: String(text)
   });
 
-  // If pressEnter requested
   if (pressEnter) {
     await chrome.debugger.sendCommand({ tabId: targetTab.id }, "Input.dispatchKeyEvent", {
       type: "rawKeyDown",
@@ -699,7 +751,7 @@ async function handleBrowserType(params) {
   return { typed: true, textLength: text.length, pressedEnter: pressEnter };
 }
 
-// 9. browser_shortcut: Hybrid shortcut execution
+// 9. browser_shortcut
 async function handleBrowserShortcut(params) {
   const { shortcut } = params;
   if (!shortcut || typeof shortcut !== "string") {
@@ -709,7 +761,6 @@ async function handleBrowserShortcut(params) {
   const targetTab = await resolveTargetTab(params.tabId);
   const normalized = shortcut.trim();
 
-  // Check for browser-level shortcuts intercepted natively via Chrome Extension APIs
   const browserAction = await handleNativeBrowserShortcut(normalized, targetTab);
   if (browserAction.handled) {
     return {
@@ -719,7 +770,6 @@ async function handleBrowserShortcut(params) {
     };
   }
 
-  // Page-level shortcut dispatched via CDP Input.dispatchKeyEvent
   await ensureDebuggerAttached(targetTab.id);
   const cdpResult = await dispatchCDPShortcut(targetTab.id, normalized);
   return {
@@ -729,23 +779,19 @@ async function handleBrowserShortcut(params) {
   };
 }
 
-// Native Chrome API shortcuts
 async function handleNativeBrowserShortcut(shortcut, targetTab) {
   const s = shortcut.toLowerCase().replace(/\s+/g, "");
 
-  // Ctrl+T / Cmd+T -> Open new tab
   if (s === "ctrl+t" || s === "cmd+t" || s === "meta+t") {
     const newTab = await chrome.tabs.create({ active: true });
     return { handled: true, result: { action: "newTab", tabId: newTab.id } };
   }
 
-  // Ctrl+W / Cmd+W -> Close target tab
   if (s === "ctrl+w" || s === "cmd+w" || s === "meta+w") {
     await chrome.tabs.remove(targetTab.id);
     return { handled: true, result: { action: "closeTab", closedTabId: targetTab.id } };
   }
 
-  // Ctrl+Shift+T / Cmd+Shift+T -> Restore closed tab
   if (s === "ctrl+shift+t" || s === "cmd+shift+t" || s === "meta+shift+t") {
     if (chrome.sessions && chrome.sessions.restore) {
       const restored = await chrome.sessions.restore();
@@ -753,7 +799,6 @@ async function handleNativeBrowserShortcut(shortcut, targetTab) {
     }
   }
 
-  // Ctrl+Tab -> Cycle active tab forward
   if (s === "ctrl+tab") {
     const tabs = await chrome.tabs.query({ windowId: targetTab.windowId });
     if (tabs.length > 1) {
@@ -764,7 +809,6 @@ async function handleNativeBrowserShortcut(shortcut, targetTab) {
     }
   }
 
-  // Ctrl+Shift+Tab -> Cycle active tab backward
   if (s === "ctrl+shift+tab") {
     const tabs = await chrome.tabs.query({ windowId: targetTab.windowId });
     if (tabs.length > 1) {
@@ -775,19 +819,16 @@ async function handleNativeBrowserShortcut(shortcut, targetTab) {
     }
   }
 
-  // Ctrl+R / F5 -> Reload tab
   if (s === "ctrl+r" || s === "cmd+r" || s === "f5") {
     await chrome.tabs.reload(targetTab.id);
     return { handled: true, result: { action: "reloadTab", tabId: targetTab.id } };
   }
 
-  // Alt+Left -> Go back
   if (s === "alt+left" || s === "cmd+left") {
     await chrome.tabs.goBack(targetTab.id);
     return { handled: true, result: { action: "goBack", tabId: targetTab.id } };
   }
 
-  // Alt+Right -> Go forward
   if (s === "alt+right" || s === "cmd+right") {
     await chrome.tabs.goForward(targetTab.id);
     return { handled: true, result: { action: "goForward", tabId: targetTab.id } };
@@ -796,7 +837,6 @@ async function handleNativeBrowserShortcut(shortcut, targetTab) {
   return { handled: false };
 }
 
-// Page-level shortcut via CDP Input.dispatchKeyEvent with modifiers and Windows Virtual Key Codes
 async function dispatchCDPShortcut(tabId, shortcut) {
   const parts = shortcut.split("+").map(p => p.trim());
   let modifiers = 0; // Alt=1, Ctrl=2, Meta=4, Shift=8
@@ -815,7 +855,6 @@ async function dispatchCDPShortcut(tabId, shortcut) {
 
   const keyMapping = getKeyMetadata(key);
 
-  // Dispatch rawKeyDown
   await chrome.debugger.sendCommand({ tabId }, "Input.dispatchKeyEvent", {
     type: "rawKeyDown",
     modifiers,
@@ -824,7 +863,6 @@ async function dispatchCDPShortcut(tabId, shortcut) {
     code: keyMapping.code
   });
 
-  // Dispatch keyUp
   await chrome.debugger.sendCommand({ tabId }, "Input.dispatchKeyEvent", {
     type: "keyUp",
     modifiers,
@@ -838,11 +876,9 @@ async function dispatchCDPShortcut(tabId, shortcut) {
 
 function getKeyMetadata(keyStr) {
   const k = keyStr.toUpperCase();
-  // Standard single letters A-Z
   if (k.length === 1 && k >= "A" && k <= "Z") {
     return { key: keyStr, code: `Key${k}`, keyCode: k.charCodeAt(0) };
   }
-  // Numbers 0-9
   if (k.length === 1 && k >= "0" && k <= "9") {
     return { key: keyStr, code: `Digit${k}`, keyCode: k.charCodeAt(0) };
   }
@@ -886,7 +922,6 @@ function getKeyMetadata(keyStr) {
     return specialKeys[k];
   }
 
-  // Fallback
   return { key: keyStr, code: keyStr, keyCode: keyStr.charCodeAt(0) || 0 };
 }
 
@@ -913,7 +948,6 @@ async function handleBrowserNavigate(params) {
     return { navigated: "reload", tabId: targetTab.id };
   }
 
-  // Ensure valid URL scheme
   let targetUrl = url;
   if (!/^https?:\/\//i.test(targetUrl) && !/^about:/i.test(targetUrl) && !/^chrome:\/\//i.test(targetUrl)) {
     targetUrl = "https://" + targetUrl;
@@ -928,38 +962,79 @@ async function handleBrowserNavigate(params) {
 // -------------------------------------------------------------
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "getStatus") {
-    sendResponse({
-      status: currentStatus,
-      attachedCount: attachedTabs.size,
-      errorMessage: lastErrorMessage
+    chrome.storage.local.get({
+      enabled: false,
+      deviceAllowed: false,
+      serverUrl: "",
+      token: ""
+    }, (cfg) => {
+      sendResponse({
+        status: currentStatus,
+        attachedCount: attachedTabs.size,
+        errorMessage: lastErrorMessage,
+        enabled: cfg.enabled,
+        deviceAllowed: cfg.deviceAllowed,
+        paired: !!(cfg.serverUrl && cfg.token)
+      });
     });
-    return false;
+    return true;
   }
 
   if (request.type === "toggleState") {
-    if (request.enabled) {
-      chrome.storage.local.get({ serverUrl: "ws://localhost:8080/ws", token: "" }, (cfg) => {
-        connectWebSocket(cfg.serverUrl, cfg.token);
-        startKeepAlive();
-        sendResponse({ status: currentStatus, attachedCount: attachedTabs.size });
-      });
-    } else {
-      currentStatus = "off";
-      stopKeepAlive();
-      if (ws) {
-        try { ws.close(); } catch (e) {}
-        ws = null;
+    chrome.storage.local.set({ enabled: request.enabled }, () => {
+      if (request.enabled) {
+        chrome.storage.local.get({ serverUrl: "", token: "", deviceAllowed: false }, (cfg) => {
+          if (cfg.deviceAllowed && cfg.serverUrl) {
+            connectWebSocket(cfg.serverUrl, cfg.token);
+            startKeepAlive();
+          } else {
+            currentStatus = !cfg.deviceAllowed ? "blocked" : "off";
+          }
+          sendResponse({ status: currentStatus, attachedCount: attachedTabs.size });
+        });
+      } else {
+        currentStatus = "off";
+        lastErrorMessage = "";
+        stopKeepAlive();
+        if (ws) {
+          try { ws.close(); } catch (e) {}
+          ws = null;
+        }
+        detachAllDebuggers();
+        sendResponse({ status: "off", attachedCount: 0 });
       }
-      detachAllDebuggers();
-      sendResponse({ status: "off", attachedCount: 0 });
-    }
-    return true; // async sendResponse
+    });
+    return true;
+  }
+
+  if (request.type === "setDeviceAllowed") {
+    chrome.storage.local.set({ deviceAllowed: request.allowed }, () => {
+      chrome.storage.local.get({ enabled: false, serverUrl: "", token: "" }, (cfg) => {
+        if (request.allowed && cfg.enabled && cfg.serverUrl) {
+          connectWebSocket(cfg.serverUrl, cfg.token);
+          startKeepAlive();
+        } else if (!request.allowed) {
+          currentStatus = "blocked";
+          lastErrorMessage = "Device access not allowed.";
+          stopKeepAlive();
+          if (ws) {
+            try { ws.close(); } catch (e) {}
+            ws = null;
+          }
+          detachAllDebuggers();
+        }
+        sendResponse({ status: currentStatus });
+      });
+    });
+    return true;
   }
 
   if (request.type === "reconnect") {
-    chrome.storage.local.get({ serverUrl: "ws://localhost:8080/ws", token: "" }, (cfg) => {
-      connectWebSocket(cfg.serverUrl, cfg.token);
-      sendResponse({ status: "connecting" });
+    chrome.storage.local.get({ serverUrl: "", token: "" }, (cfg) => {
+      if (cfg.serverUrl) {
+        connectWebSocket(cfg.serverUrl, cfg.token);
+      }
+      sendResponse({ status: currentStatus });
     });
     return true;
   }
