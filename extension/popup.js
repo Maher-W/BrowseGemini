@@ -31,16 +31,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   const saveFeedback = document.getElementById("saveFeedback");
 
   // URL normalizer: converts domain or http/https to wss://.../ws
+  // Forces wss:// for all non-localhost domains
   function normalizeWebSocketUrl(rawUrl) {
     let u = (rawUrl || "").trim();
     if (!u) return "";
     if (u.startsWith("https://")) {
-      u = "wss://" + u.slice(8);
+      u = u.slice(8);
     } else if (u.startsWith("http://")) {
-      u = "ws://" + u.slice(7);
-    } else if (!u.startsWith("ws://") && !u.startsWith("wss://")) {
-      u = "wss://" + u;
+      u = u.slice(7);
+    } else if (u.startsWith("wss://")) {
+      u = u.slice(6);
+    } else if (u.startsWith("ws://")) {
+      u = u.slice(5);
     }
+    const isLocal = u.startsWith("localhost") || u.startsWith("127.0.0.1");
+    const protocol = isLocal ? "ws://" : "wss://";
+    u = protocol + u;
     try {
       const parsed = new URL(u);
       if (!parsed.pathname || parsed.pathname === "/" || parsed.pathname === "/mcp") {
