@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -23,6 +24,99 @@ func getEnv(key, defaultVal string) string {
 	}
 	return val
 }
+
+var homeTemplate = template.Must(template.New("home").Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BrowseGemini Server</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --primary: #3b82f6;
+      --success: #10b981;
+      --warning: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; max-width: 520px; width: 100%; padding: 32px; box-shadow: 0 25px 35px -5px rgba(0,0,0,0.5); }
+    .header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+    .logo { width: 44px; height: 44px; border-radius: 10px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; }
+    h1 { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 13px; color: var(--muted); }
+    .status-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; margin-bottom: 24px; }
+    .badge-online { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .info-box { background: #0b1120; border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 20px; }
+    .info-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
+    .endpoint-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; font-family: monospace; }
+    .endpoint-item:last-child { margin-bottom: 0; }
+    .endpoint-label { color: var(--muted); font-family: sans-serif; font-size: 12px; }
+    .endpoint-val { color: #60a5fa; word-break: break-all; }
+    .steps { list-style: none; counter-reset: step-counter; }
+    .steps li { counter-increment: step-counter; position: relative; padding-left: 28px; margin-bottom: 12px; font-size: 13px; color: #cbd5e1; line-height: 1.5; }
+    .steps li::before { content: counter(step-counter); position: absolute; left: 0; top: 0; width: 18px; height: 18px; border-radius: 50%; background: var(--primary); color: white; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+    .footer { margin-top: 24px; text-align: center; font-size: 12px; color: #64748b; }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+          <path d="M2 12h20"/>
+        </svg>
+      </div>
+      <div>
+        <h1>BrowseGemini Server</h1>
+        <div class="sub">Remote Model Context Protocol (MCP) Bridge</div>
+      </div>
+    </div>
+
+    <div class="status-badge badge-online">
+      <span class="dot"></span>
+      <span>Server Online & Ready</span>
+    </div>
+
+    <div class="info-box">
+      <div class="info-title">Server Endpoints</div>
+      <div class="endpoint-item">
+        <span class="endpoint-label">Gemini MCP:</span>
+        <span class="endpoint-val">{{.BaseURL}}/mcp</span>
+      </div>
+      <div class="endpoint-item">
+        <span class="endpoint-label">Extension WS:</span>
+        <span class="endpoint-val">{{.WsURL}}</span>
+      </div>
+      <div class="endpoint-item">
+        <span class="endpoint-label">Health Check:</span>
+        <span class="endpoint-val"><a href="/health" target="_blank">/health</a></span>
+      </div>
+    </div>
+
+    <div class="info-title" style="margin-bottom: 10px;">Setup Instructions</div>
+    <ol class="steps">
+      <li><strong>Install Chrome Extension:</strong> Load the <code>extension/</code> directory in Chrome (<code>chrome://extensions</code>).</li>
+      <li><strong>Configure Extension:</strong> Set Server URL to <code>{{.WsURL}}</code> and enter your <code>EXTENSION_SECRET_TOKEN</code>, then switch toggle to <strong>ON</strong>.</li>
+      <li><strong>Connect Gemini:</strong> Go to <a href="https://gemini.google.com" target="_blank">gemini.google.com</a> &rarr; Settings &rarr; Connected apps &rarr; Add custom connected app, and paste <code>{{.BaseURL}}/mcp</code>.</li>
+      <li><strong>Authorize:</strong> Enter your <code>ADMIN_PASSWORD</code> when prompted to complete the setup.</li>
+    </ol>
+
+    <div class="footer">
+      BrowseGemini &bull; Open Source on <a href="https://github.com/Maher-W/BrowseGemini" target="_blank">GitHub</a>
+    </div>
+  </div>
+</body>
+</html>`))
 
 func main() {
 	log.Println("==================================================")
@@ -61,6 +155,37 @@ func main() {
 
 	// 5. Setup HTTP Router
 	mux := http.NewServeMux()
+
+	// Landing Page on GET /
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		currentBase := baseURL
+		if currentBase == "" {
+			scheme := "http"
+			if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+				scheme = "https"
+			}
+			currentBase = fmt.Sprintf("%s://%s", scheme, r.Host)
+		}
+		wsScheme := "ws"
+		if len(currentBase) >= 5 && currentBase[:5] == "https" {
+			wsScheme = "wss"
+		}
+		hostOnly := r.Host
+		if currentBase != "" {
+			if len(currentBase) > 8 && currentBase[:8] == "https://" {
+				hostOnly = currentBase[8:]
+			} else if len(currentBase) > 7 && currentBase[:7] == "http://" {
+				hostOnly = currentBase[7:]
+			}
+		}
+
+		data := map[string]string{
+			"BaseURL": currentBase,
+			"WsURL":   fmt.Sprintf("%s://%s/ws", wsScheme, hostOnly),
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = homeTemplate.Execute(w, data)
+	})
 
 	// Health check (Coolify / Docker)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
